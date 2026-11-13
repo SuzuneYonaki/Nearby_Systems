@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.log
+data/journal_positions.json
+data/systems_dataset.db
+.vscode/
+.idea/

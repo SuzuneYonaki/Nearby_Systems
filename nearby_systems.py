@@ -41,6 +41,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 import boxel_calculator as bc
+from i18n import set_lang, tr
 import sector_name_generator as gen
 import sector_neighbors as sn
 
@@ -69,7 +70,7 @@ COORD_LIMIT = 200_000.0     # |x|, |y|, |z| above this ly is not a position of t
 MAX_RADIUS_INPUT, MAX_HOPS_INPUT, MAX_SYSTEMS_INPUT = 1000.0, 1_000_000, 1_000_000
 JOURNAL_TAIL_BYTES = 8 * 1024 * 1024   # of a journal file only its end is read
 POSITION_EVENTS = ("Location", "FSDJump", "CarrierJump")
-SRC_CATALOG, SRC_EDSM, SRC_BOTH = "カタログ", "EDSM", "両方"
+SRC_CATALOG, SRC_EDSM, SRC_BOTH = "Catalog", "EDSM", "Both"
 SOURCE_EDSM, SOURCE_CATALOG, SOURCE_BOTH = "edsm", "catalog", "both"
 SOURCES = (SOURCE_EDSM, SOURCE_CATALOG, SOURCE_BOTH)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]")   # control, zero-width and bidi-override characters (written as escapes: no invisible characters in this source)
@@ -157,15 +158,15 @@ def check_position(pos: Sequence[float]) -> Tuple[float, float, float]:
     try:
         x, y, z = (float(v) for v in pos)
     except (TypeError, ValueError):
-        raise ValueError("座標は数値 3 つ")
+        raise ValueError(tr("Coordinates must be 3 numbers", "座標は数値 3 つ"))
     if not all(math.isfinite(v) and abs(v) <= COORD_LIMIT for v in (x, y, z)):
-        raise ValueError(f"座標は ±{COORD_LIMIT:,.0f} ly 以内の有限の数")
+        raise ValueError(tr("Coordinates must be finite within ±{lim:,.0f} ly", "座標は ±{lim:,.0f} ly 以内の有限の数", lim=COORD_LIMIT))
     return x, y, z
 
 
 def check_id64(v: int) -> int:
     if not isinstance(v, int) or isinstance(v, bool) or not 0 < v < 2 ** 63:
-        raise ValueError("id64 は 1 以上 2^63 未満の整数")
+        raise ValueError(tr("id64 must be an integer in [1, 2^63)", "id64 は 1 以上 2^63 未満の整数"))
     return v
 
 
@@ -241,7 +242,7 @@ def journal_position(journal_dir: Path = JOURNAL_DIR, max_files: int = 30) -> Tu
     """(system name, id64, position) of the last Location / FSDJump / CarrierJump in the newest journal files. Raises ValueError when there is none."""
     files = sorted(Path(journal_dir).glob("Journal.*.log"), key=lambda p: p.stat().st_mtime, reverse=True)[:max_files]
     if not files:
-        raise ValueError(f"ジャーナルが見つからない: {journal_dir}")
+        raise ValueError(tr("Journal directory not found: {jd}", "ジャーナルが見つからない: {jd}", jd=journal_dir))
     for f in files:
         try:
             with open(f, "rb") as fh:   # only the end of the file: a journal can be huge, and a position is among its last lines
@@ -265,7 +266,7 @@ def journal_position(journal_dir: Path = JOURNAL_DIR, max_files: int = 30) -> Tu
                 continue
             addr = e.get("SystemAddress")
             return clean_name(e.get("StarSystem")) or "", addr if isinstance(addr, int) and not isinstance(addr, bool) and 0 < addr < 2 ** 63 else None, pos
-    raise ValueError(f"最新 {len(files)} 本のジャーナルに位置(Location / FSDJump / CarrierJump)が無い")
+    raise ValueError(tr("No Location/FSDJump/CarrierJump in latest {n} journal(s)", "最新 {n} 本のジャーナルに位置(Location / FSDJump / CarrierJump)が無い", n=len(files)))
 
 
 def _real_name(pos: Sequence[float], id64: Optional[int]) -> str:
@@ -279,13 +280,13 @@ def resolve_centre(query: str, journal_dir: Path = JOURNAL_DIR, allow_edsm: bool
     sn.use_merged_table()
     q = _CONTROL.sub("", query).strip()
     if len(q) > 200:
-        raise ValueError("入力が長すぎる(200 文字まで)")
+        raise ValueError(tr("Input too long (max 200 chars)", "入力が長すぎる(200 文字まで)"))
     if q == "" or q.lower() in ("journal", "ジャーナル"):
         name, id64, pos = journal_position(journal_dir)
-        return Centre(pos, name or None, id64, "ジャーナルの現在地")
+        return Centre(pos, name or None, id64, tr("Journal position", "ジャーナルの現在地"))
     nums = re.findall(r"-?\d+(?:\.\d+)?", q) if re.fullmatch(r"[\s,;\-\d.]+", q) else []
     if len(nums) == 3:
-        return Centre(check_position(nums), None, None, "座標")
+        return Centre(check_position(nums), None, None, tr("Coordinates", "座標"))
     if re.fullmatch(r"\d{4,}", q):
         return _centre_from_id64(check_id64(int(q)))
     return _centre_from_name(q, allow_edsm, system_fetch or edsm_system)
@@ -304,8 +305,8 @@ def _centre_from_id64(v: int) -> Centre:
         return Centre((row[1], row[2], row[3]), row[0], v, "id64 → journal_scans(DB)")
     pos = catalogue_by_id64(v)
     if pos:
-        return Centre(pos, _real_name(pos, v), v, "id64 → カタログ(正確な座標)")
-    return Centre(boxel_centre(v), procedural_name(v), v, "id64 が示すボクセルの中心(カタログに無い。座標は近似でボクセルの半分ほど外れ得る)", True)
+        return Centre(pos, _real_name(pos, v), v, tr("id64 -> Catalog (exact)", "id64 → カタログ(正確な座標)"))
+    return Centre(boxel_centre(v), procedural_name(v), v, tr("id64 boxel center (not in catalog, approximate)", "id64 が示すボクセルの中心(カタログに無い。座標は近似でボクセルの半分ほど外れ得る)"), True)
 
 
 def _centre_from_name(q: str, allow_edsm: bool = False, system_fetch: Optional[Callable[[str], Optional[dict]]] = None) -> Centre:
@@ -320,7 +321,7 @@ def _centre_from_name(q: str, allow_edsm: bool = False, system_fetch: Optional[C
     except sqlite3.Error:
         row = None
     if row:
-        return Centre((row[1], row[2], row[3]), row[0], None, "systems_dataset.db のシステム座標")
+        return Centre((row[1], row[2], row[3]), row[0], None, tr("systems_dataset.db coords", "systems_dataset.db のシステム座標"))
     m = bc._NAME_RE.match(q)
     if m:
         cells = sn._cells_named(m.group(1))
@@ -333,24 +334,24 @@ def _centre_from_name(q: str, allow_edsm: bool = False, system_fetch: Optional[C
                 v = encode_id64(m.group(3), b.local, b.sector, int(m.group(5)))
                 pos = catalogue_by_id64(v)
                 if pos:
-                    return Centre(pos, q, v, "プロシージャル名 → id64 → カタログ(正確な座標)")
+                    return Centre(pos, q, v, tr("Procedural -> id64 -> Catalog (exact)", "プロシージャル名 → id64 → カタログ(正確な座標)"))
             approx = Centre(tuple((b.lo[i] + b.hi[i]) / 2 for i in range(3)), q, None,  # type: ignore[arg-type]
-                            "プロシージャル名が示すボクセルの中心(カタログに無い。座標は近似)", True)
+                            tr("Procedural boxel center (not in catalog, approximate)", "プロシージャル名が示すボクセルの中心(カタログに無い。座標は近似)"), True)
             if not allow_edsm:
                 return approx
             try:   # EDSM may know the exact position of a system the catalogue lacks
                 found = (system_fetch or edsm_system)(q)
             except EdsmError:
                 found = None
-            return Centre(found["pos"], found["name"], found["id64"], "EDSM のシステム座標") if found else approx
+            return Centre(found["pos"], found["name"], found["id64"], tr("EDSM coords", "EDSM のシステム座標")) if found else approx
     if allow_edsm:
         try:
             found = (system_fetch or edsm_system)(q)
         except EdsmError as e:
-            raise ValueError(f"'{q}' はローカルのデータに無く、EDSM にも問い合わせできなかった: {e}")
+            raise ValueError(tr("'{q}' not in local data and EDSM query failed: {e}", "'{q}' はローカルのデータに無く、EDSM にも問い合わせできなかった: {e}", q=q, e=e))
         if found:
-            return Centre(found["pos"], found["name"], found["id64"], "EDSM のシステム座標")
-    raise ValueError(f"'{q}' を解決できない(DB にもプロシージャル名の表にも" + ("EDSM にも" if allow_edsm else "") + "無い)。座標 'x,y,z' か id64 で指定できる")
+            return Centre(found["pos"], found["name"], found["id64"], tr("EDSM coords", "EDSM のシステム座標"))
+    raise ValueError(tr("Cannot resolve '{q}' (not in DB/procedural table{ed}). Enter 'x,y,z' or id64.", "'{q}' を解決できない(DB にもプロシージャル名の表にも{ed}無い)。座標 'x,y,z' か id64 で指定できる", q=q, ed=tr(" or EDSM", "EDSM にも") if allow_edsm else ""))
 
 
 # ---------------------------------------------------------------- EDSM (network input is untrusted: HTTPS only, no redirects, size / count limits, checked and cleaned, cached, rate limited)
@@ -374,10 +375,10 @@ def _http_get_json(url: str):
     """the parsed JSON of one GET request, politely: at least EDSM_MIN_INTERVAL after the previous request, none during the cooldown after a failure, no retry. Raises EdsmError."""
     global _last_request, _cooldown_until
     if not url.startswith("https://www.edsm.net/"):
-        raise EdsmError("EDSM 以外の宛先は拒否する")
+        raise EdsmError(tr("Refused non-EDSM URL", "EDSM 以外の宛先は拒否する"))
     now = time.monotonic()
     if now < _cooldown_until:
-        raise EdsmError(f"EDSM は直前に失敗したので、あと {_cooldown_until - now:.0f} 秒は問い合わせない")
+        raise EdsmError(tr("EDSM cooldown after failure ({s:.0f}s left)", "EDSM は直前に失敗したので、あと {s:.0f} 秒は問い合わせない", s=_cooldown_until - now))
     wait = _last_request + EDSM_MIN_INTERVAL - now
     if wait > 0:
         time.sleep(wait)
@@ -389,17 +390,17 @@ def _http_get_json(url: str):
     except urllib.error.HTTPError as e:
         retry = e.headers.get("Retry-After") if e.headers else None
         _cooldown_until = time.monotonic() + (min(max(float(retry), 1.0), EDSM_COOLDOWN_MAX) if retry and retry.strip().isdigit() else EDSM_COOLDOWN)
-        raise EdsmError(f"EDSM が HTTP {int(e.code)} を返した")   # the server's own text is not echoed
+        raise EdsmError(tr("EDSM returned HTTP {c}", "EDSM が HTTP {c} を返した", c=int(e.code)))   # the server's own text is not echoed
     except (urllib.error.URLError, OSError, ValueError) as e:      # includes timeouts and certificate errors
         _cooldown_until = time.monotonic() + EDSM_COOLDOWN
-        raise EdsmError(f"EDSM に問い合わせできない({type(e).__name__})")
+        raise EdsmError(tr("EDSM request failed ({err})", "EDSM に問い合わせできない({err})", err=type(e).__name__))
     if len(body) > EDSM_MAX_BYTES:
         _cooldown_until = time.monotonic() + EDSM_COOLDOWN
-        raise EdsmError(f"EDSM の応答が大きすぎる(上限 {EDSM_MAX_BYTES // 1024 // 1024} MB)")
+        raise EdsmError(tr("EDSM response too large (max {mb} MB)", "EDSM の応答が大きすぎる(上限 {mb} MB)", mb=EDSM_MAX_BYTES // 1024 // 1024))
     try:
         return json.loads(body.decode("utf-8"))
     except (ValueError, RecursionError):   # UnicodeDecodeError is a ValueError; RecursionError: absurdly nested JSON
-        raise EdsmError("EDSM の応答が JSON ではない")
+        raise EdsmError(tr("EDSM response is not JSON", "EDSM の応答が JSON ではない"))
 
 
 def _parse_system(s) -> Optional[dict]:
@@ -424,7 +425,7 @@ def _to_raw(s: dict) -> dict:
 
 def _parse_systems(data) -> List[dict]:
     if not isinstance(data, list):
-        raise EdsmError("EDSM の応答が想定外(一覧ではない)")
+        raise EdsmError(tr("Unexpected EDSM response (not a list)", "EDSM の応答が想定外(一覧ではない)"))
     out = []
     for s in data[:EDSM_MAX_SYSTEMS]:
         p = _parse_system(s)
@@ -513,7 +514,7 @@ def fetch_edsm(pos: Sequence[float], radius: float, now: Optional[float] = None)
     hit = _cache_lookup(pos, r, True, now)
     if hit is not None:
         rows = EdsmRows(hit[1])
-        rows.origin = f"キャッシュ({(now - hit[0]) / 3600:.1f} 時間前に取得。通信なし)"
+        rows.origin = tr("Cache ({h:.1f}h ago, offline)", "キャッシュ({h:.1f} 時間前に取得。通信なし)", h=(now - hit[0]) / 3600)
         return rows
     big = min(r + EDSM_PREFETCH, EDSM_MAX_RADIUS)
     params = {"x": f"{pos[0]:.5f}", "y": f"{pos[1]:.5f}", "z": f"{pos[2]:.5f}", "radius": f"{big:.1f}", "showCoordinates": 1, "showId": 1}
@@ -524,12 +525,12 @@ def fetch_edsm(pos: Sequence[float], radius: float, now: Optional[float] = None)
         if old is None:
             raise
         rows = EdsmRows(old[1])
-        rows.origin = f"古いキャッシュ({(now - old[0]) / 3600:.0f} 時間前。EDSM に問い合わせできなかった: {e})"
+        rows.origin = tr("Stale cache ({h:.0f}h ago; EDSM failed: {e})", "古いキャッシュ({h:.0f} 時間前。EDSM に問い合わせできなかった: {e})", h=(now - old[0]) / 3600, e=e)
         return rows
     systems = [s for s in systems if math.dist((s["x"], s["y"], s["z"]), pos) <= big]
     stored = _cache_store(pos, big, systems, now)
     rows = EdsmRows(s for s in systems if math.dist((s["x"], s["y"], s["z"]), pos) <= r)
-    rows.origin = f"EDSM から取得({len(systems)} 系、半径 {big:g} ly" + ("、キャッシュに保存)" if stored else "、キャッシュには保存できなかった)")
+    rows.origin = tr("EDSM ({n} systems, R={r:g} ly, {st})", "EDSM から取得({n} 系、半径 {r:g} ly{st}", n=len(systems), r=big, st=tr("cached", "、キャッシュに保存)") if stored else tr("uncached", "、キャッシュには保存できなかった)"))
     return rows
 
 
@@ -558,7 +559,7 @@ def edsm_system(name: str, now: Optional[float] = None) -> Optional[dict]:
         raise
     s = _parse_system(data) if isinstance(data, dict) else None
     if isinstance(data, dict) and s is None and data:
-        raise EdsmError("EDSM の応答が想定外(システムの形ではない)")
+        raise EdsmError(tr("Unexpected EDSM response (invalid system object)", "EDSM の応答が想定外(システムの形ではない)"))
     try:
         if not CACHE_DIR.is_symlink():
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -670,13 +671,13 @@ def search(where: str, radius: float = DEFAULT_RADIUS, hops: int = 1, source: st
            centre: Optional[Centre] = None, system_fetch: Optional[Callable[[str], Optional[dict]]] = None) -> SearchResult:
     """resolve the point, gather the systems within radius * hops from `source` (edsm / catalog / both) and chain them. When EDSM cannot be asked the catalogue is used (a note says so)."""
     if source not in SOURCES:
-        raise ValueError(f"ソースは {', '.join(SOURCES)} のどれか")
+        raise ValueError(tr("Source must be one of: {s}", "ソースは {s} のどれか", s=", ".join(SOURCES)))
     if not (0 < radius <= MAX_RADIUS_INPUT and math.isfinite(radius)):
-        raise ValueError(f"半径は 0 より大きく {MAX_RADIUS_INPUT:g} ly 以下")
+        raise ValueError(tr("Radius must be in (0, {m:g}] ly", "半径は 0 より大きく {m:g} ly 以下", m=MAX_RADIUS_INPUT))
     if not 1 <= hops <= MAX_HOPS_INPUT:
-        raise ValueError(f"ジャンプ回数は 1 以上 {MAX_HOPS_INPUT:,} 以下")
+        raise ValueError(tr("Hops must be in 1..{m:,}", "ジャンプ回数は 1 以上 {m:,} 以下", m=MAX_HOPS_INPUT))
     if not 1 <= max_systems <= MAX_SYSTEMS_INPUT:
-        raise ValueError(f"上限は 1 以上 {MAX_SYSTEMS_INPUT:,} 以下")
+        raise ValueError(tr("Max systems must be in 1..{m:,}", "上限は 1 以上 {m:,} 以下", m=MAX_SYSTEMS_INPUT))
     use_edsm = source != SOURCE_CATALOG
     c = centre or resolve_centre(where, journal_dir, use_edsm, system_fetch)
     c = Centre(check_position(c.pos), clean_name(c.name), c.id64, c.how, c.approximate)
@@ -692,11 +693,11 @@ def search(where: str, radius: float = DEFAULT_RADIUS, hops: int = 1, source: st
             if origin:
                 info.append(f"EDSM: {origin}")
             if reach > EDSM_MAX_RADIUS:
-                notes.append(f"EDSM は中心から {EDSM_MAX_RADIUS:g} ly までしか取得していない(半径×n = {reach:,.0f} ly)。その先へは伸びない" + ("" if source == SOURCE_BOTH else "(カタログなら --source catalog / both)"))
+                notes.append(tr("EDSM is capped at {er:g} ly from center (requested {r:,.0f} ly).", "EDSM は中心から {er:g} ly までしか取得していない(半径×n = {r:,.0f} ly)。その先へは伸びない", er=EDSM_MAX_RADIUS, r=reach) + ("" if source == SOURCE_BOTH else tr(" (use --source catalog/both for farther)", "(カタログなら --source catalog / both)")))
         except EdsmError as e:
             ed = None
             fallback = source == SOURCE_EDSM
-            notes.append(f"EDSM: {e}。" + ("カタログで代用した" if fallback else "カタログだけで表示している"))
+            notes.append(f"EDSM: {e}. " + (tr("Fell back to catalog.", "カタログで代用した") if fallback else tr("Showing catalog only.", "カタログだけで表示している")))
     use_cat = (source in (SOURCE_CATALOG, SOURCE_BOTH) or fallback) and catalogue_available()
     if source == SOURCE_CATALOG and not catalogue_available():
         raise ValueError("Local catalog (data/full_catalog) is not installed. Please use EDSM mode.")
@@ -705,61 +706,67 @@ def search(where: str, radius: float = DEFAULT_RADIUS, hops: int = 1, source: st
     if use_cat:
         area = fit_reach(c.pos, reach)
         if area < reach:
-            notes.append(f"カタログは中心から {area:g} ly の立方体までしか読んでいない(半径×n = {reach:,.0f} ly は系が多すぎる。上限 {MAX_BOX_ROWS:,} 系)。その外側へは伸びない")
+            notes.append(tr("Catalog cube capped at {a:g} ly (requested {r:,.0f} ly exceeded {m:,} systems).", "カタログは中心から {a:g} ly の立方体までしか読んでいない(半径×n = {r:,.0f} ly は系が多すぎる。上限 {m:,} 系)。その外側へは伸びない", a=area, r=reach, m=MAX_BOX_ROWS))
         pts, ids, srcs, ed_names = gather(c.pos, area, ed)
     else:
         area = min(reach, EDSM_MAX_RADIUS)
         pts, ids, srcs, ed_names = gather_edsm(c.pos, area, ed or [])
     hop, parent, step, truncated = daisy_chain(c.pos, pts, radius, hops, max_systems)
     if truncated:
-        notes.append(f"上限 {max_systems} 系で打ち切った(--max で変えられる)。後ろのジャンプは一部しか出ていない")
+        notes.append(tr("Truncated at {m} systems (change with --max).", "上限 {m} 系で打ち切った(--max で変えられる)。後ろのジャンプは一部しか出ていない", m=max_systems))
     if c.approximate:
-        notes.append("中心の座標が近似(ボクセルの中心)。半径内の顔ぶれは実際の位置とずれ得る")
+        notes.append(tr("Center coordinates are approximate (boxel center).", "中心の座標が近似(ボクセルの中心)。半径内の顔ぶれは実際の位置とずれ得る"))
     reached = [int(i) for i in np.nonzero(hop >= 0)[0]]
     db_names = db_names_in_box(c.pos, area) if use_cat and reached else {}
-    names = {i: clean_name(db_names.get(key32(*pts[i]))) or ed_names[i] or (procedural_name(ids[i]) if ids[i] else "(名前なし)") for i in reached}   # only the listed systems get a name
+    names = {i: clean_name(db_names.get(key32(*pts[i]))) or ed_names[i] or (procedural_name(ids[i]) if ids[i] else tr("(Unnamed)", "(名前なし)")) for i in reached}   # only the listed systems get a name
     rows = []
     for i in reached:
         rows.append({"hop": int(hop[i]), "name": names[i], "x": float(pts[i][0]), "y": float(pts[i][1]), "z": float(pts[i][2]), "id64": ids[i], "src": srcs[i],
-                     "step": float(step[i]), "dist": math.dist(pts[i], c.pos), "parent": names[int(parent[i])] if parent[i] >= 0 else ("中心" if hop[i] else "")})
+                     "step": float(step[i]), "dist": math.dist(pts[i], c.pos), "parent": names[int(parent[i])] if parent[i] >= 0 else (tr("Center", "中心") if hop[i] else "")})
     rows.sort(key=lambda r: (r["hop"], r["step"]))
     return SearchResult(c, rows, notes, truncated, info)
 
 
-SOURCE_LABEL = {SOURCE_EDSM: "EDSM", SOURCE_CATALOG: "カタログ(オフライン)", SOURCE_BOTH: "カタログ + EDSM"}
+def get_source_label(src: str) -> str:
+    return {SOURCE_EDSM: "EDSM", SOURCE_CATALOG: tr("Catalog (Offline)", "カタログ(オフライン)"), SOURCE_BOTH: tr("Catalog + EDSM", "カタログ + EDSM")}.get(src, src)
+
+
+SOURCE_LABEL = {SOURCE_EDSM: "EDSM", SOURCE_CATALOG: "Catalog (Offline)", SOURCE_BOTH: "Catalog + EDSM"}
 
 
 def render(res: SearchResult, radius: float, hops: int, source: str) -> str:
     c = res.centre
-    lines = [f"中心 {c.name or '(座標)'}  ({c.pos[0]:.4f}, {c.pos[1]:.4f}, {c.pos[2]:.4f}) ly" + (f"  id64 {c.id64}" if c.id64 else "") + f"  [{c.how}]",
-             f"半径 {radius:g} ly × {hops} ジャンプ  ソース: {SOURCE_LABEL.get(source, source)}"]
-    lines += [f"取得: {i}" for i in res.info]
+    lines = [tr("Center {nm}  ({x:.4f}, {y:.4f}, {z:.4f}) ly", "中心 {nm}  ({x:.4f}, {y:.4f}, {z:.4f}) ly", nm=c.name or tr("(Coords)", "(座標)"), x=c.pos[0], y=c.pos[1], z=c.pos[2]) + (f"  id64 {c.id64}" if c.id64 else "") + f"  [{c.how}]",
+             tr("Radius {r:g} ly x {h} hop(s)  Source: {src}", "半径 {r:g} ly × {h} ジャンプ  ソース: {src}", r=radius, h=hops, src=get_source_label(source))]
+    lines += [tr("Info: {i}", "取得: {i}", i=i) for i in res.info]
     counts = dict(sorted(Counter(r["hop"] for r in res.rows).items()))   # only the hops that exist (n can be huge)
-    lines.append("系の数: " + "、".join(f"{'中心' if h == 0 else f'{h} ジャンプ目'} {n}" for h, n in counts.items()) + f"  (合計 {sum(counts.values())})")
-    lines.append(f"{'hop':>3}  {'直前から':>8} {'中心から':>8}  {'名前':<34}{'直前の系':<30}{'出どころ':<7}{'x':>12}{'y':>12}{'z':>12}  id64")
+    lines.append(tr("Systems: ", "系の数: ") + ", ".join((tr("Center", "中心") if h == 0 else tr("Hop {h}", "{h} ジャンプ目", h=h)) + f" {n}" for h, n in counts.items()) + tr("  (Total {tot})", "  (合計 {tot})", tot=sum(counts.values())))
+    lines.append(f"{'hop':>3}  {tr('FromPrev', '直前から'):>8} {tr('FromOrig', '中心から'):>8}  {tr('Name', '名前'):<34}{tr('Via', '直前の系'):<30}{tr('Source', '出どころ'):<7}{'x':>12}{'y':>12}{'z':>12}  id64")
     for r in res.rows:
         lines.append(f"{r['hop']:>3}  {r['step']:>8.2f} {r['dist']:>8.2f}  {r['name']:<34}{r['parent']:<30}{r['src']:<7}{r['x']:>12.4f}{r['y']:>12.4f}{r['z']:>12.4f}  {r['id64'] or ''}")
     for note in res.notes:
-        lines.append(f"注意: {note}")
+        lines.append(tr("Note: {note}", "注意: {note}", note=note))
     return "\n".join(lines)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="ある地点から 15 ly 以内の星系(と、ジャンプを n 回つなげた範囲)を一覧する")
-    ap.add_argument("where", nargs="?", default="", help="空 = ジャーナルの現在地 / 'x,y,z' / id64 / 星系名")
-    ap.add_argument("--radius", "-r", type=float, default=DEFAULT_RADIUS, help="1 ジャンプの半径 ly(既定 15)")
-    ap.add_argument("--hops", "-n", type=int, default=1, help="ジャンプ回数 n(既定 1)。各ジャンプ先からさらに半径内を探す")
-    ap.add_argument("--source", choices=SOURCES, default=SOURCE_EDSM, help="系を取ってくる元(既定 edsm。catalog = ローカルのカタログ、オフライン可。both = 両方)")
-    ap.add_argument("--max", type=int, default=DEFAULT_MAX, help=f"出す系の上限(既定 {DEFAULT_MAX})")
+    ap = argparse.ArgumentParser(description="List star systems within R ly (default 15 ly) and multi-hop reachable chains")
+    ap.add_argument("where", nargs="?", default="", help="Empty = journal pos / 'x,y,z' / id64 / system name")
+    ap.add_argument("--radius", "-r", type=float, default=DEFAULT_RADIUS, help="Jump radius in ly (default: 15)")
+    ap.add_argument("--hops", "-n", type=int, default=1, help="Chained hops n (default: 1)")
+    ap.add_argument("--source", choices=SOURCES, default=SOURCE_EDSM, help="Data source: edsm (default), catalog (offline), or both")
+    ap.add_argument("--max", type=int, default=DEFAULT_MAX, help=f"Max systems to return (default: {DEFAULT_MAX})")
     ap.add_argument("--journal-dir", default=str(JOURNAL_DIR))
+    ap.add_argument("--lang", choices=["en", "ja"], default="en", help="Output language (en or ja, default: en)")
     args = ap.parse_args(argv)
+    set_lang(args.lang)
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     try:
         res = search(args.where, args.radius, args.hops, args.source, args.max, Path(args.journal_dir))
     except (ValueError, OSError) as e:
-        print(f"エラー: {e}", file=sys.stderr)
+        print(tr("Error: {e}", "エラー: {e}", e=e), file=sys.stderr)
         return 2
     print(render(res, args.radius, args.hops, args.source))
     return 0

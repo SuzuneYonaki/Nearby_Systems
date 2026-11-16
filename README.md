@@ -11,7 +11,8 @@ GUI and CLI tools for **Elite Dangerous** to explore nearby star systems within 
 ### 1. Nearby Systems (`nearby_systems_gui.py` / `nearby_systems.py`)
 Finds reachable star systems within a configurable radius (default **15 ly**) from a system name, `id64`, `(x, y, z)` coordinates, or the Commander's current journal position.
 - Supports multi-hop chaining (`Hops n`), overlapping-sphere omission, EDSM (cached & rate-limited) or offline local catalog lookup, and CSV route save/load.
-- **15 ly Sphere Tour & Read-Only `FSDJump` Auto-Copy**: Click **Start Sphere Tour (Wait FSDJump)** to arm nearest-first traversal within 15 ly; monitors `Journal.*.log` in read-only mode and auto-copies the next nearest system name once per `FSDJump` (with manual **Copy Next**, **Skip**, and **Stop** controls).
+- **15 ly Sphere Tour & Read-Only `FSDJump` Auto-Copy**: Click **Start Sphere Tour (Wait FSDJump)** to arm nearest-first traversal within 15 ly; monitors `Journal.*.log` in read-only mode and auto-copies the next nearest system name once per `FSDJump` (toggleable via **Auto-copy**, plus manual **Copy Next**, **Skip**, and **Stop** controls).
+- **CLI Support**: `python nearby_systems.py [origin] --radius 15 --hops 1 --lang en` (`--lang ja` for Japanese).
 
 ```bash
 python nearby_systems_gui.py

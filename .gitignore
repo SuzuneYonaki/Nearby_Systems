@@ -8,5 +8,7 @@ __pycache__/
 *.log
 data/journal_positions.json
 data/systems_dataset.db
+data/edsm_cache/
+.pytest_cache/
 .vscode/
 .idea/

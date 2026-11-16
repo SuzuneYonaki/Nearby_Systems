@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Sequence
 
 from i18n import set_lang, tr
 import nearby_systems as ns
+import sphere_tour
 
 def get_columns():
     return [("hop", "hop", 40, "center"), ("name", tr("Name", "名前"), 230, "w"), ("step", tr("From Prev", "直前から"), 70, "e"), ("dist", tr("From Origin", "中心から"), 70, "e"), ("parent", tr("Via System", "直前の系"), 190, "w"),
@@ -82,7 +83,12 @@ class NearbySystemsApp(ttk.Frame):
         self.params = (ns.DEFAULT_RADIUS, 1, ns.SOURCE_EDSM)    # (radius, n, source) of the displayed table
         self.sort: Optional[tuple] = None              # (column key, descending) of the table, None = the original order (hop, distance); kept across searches
         self.start_text = ""                           # the 現在地 text that started the route
-        self.history: list = []                        # snapshots (route, current, params, start_text), oldest first; 戻る pops the last
+        self.history: list = []
+        self.tour_manager = sphere_tour.SphereTourManager()
+        self.jump_monitor = sphere_tour.FSDJumpMonitor()
+        self.tour_status_var = tk.StringVar(value=tr("Tour: Idle", "巡回: 停止中"))
+        self._tour_poll_after_id = None
+        self._last_auto_copied_token: Optional[str] = None                        # snapshots (route, current, params, start_text), oldest first; 戻る pops the last
         self._build()
 
     def _build(self):
@@ -126,6 +132,18 @@ class NearbySystemsApp(ttk.Frame):
         ttk.Button(buttons, text=tr("Save Route (CSV)", "経路を保存(CSV)"), command=self.save_route).pack(side="left", padx=(18, 6))
         self.load_button = ttk.Button(buttons, text=tr("Load Route (CSV)", "経路を読み込み(CSV)"), command=self.load_route)
         self.load_button.pack(side="left")
+
+        tour_bar = ttk.Frame(self)
+        tour_bar.pack(fill="x", pady=(4, 0))
+        self.tour_start_button = ttk.Button(tour_bar, text=tr("Start Sphere Tour (Wait FSDJump)", "15ly巡回開始 (FSDJump待機)"), command=self.start_sphere_tour)
+        self.tour_start_button.pack(side="left")
+        self.tour_copy_button = ttk.Button(tour_bar, text=tr("Copy Next", "次の星系をコピー"), command=self.copy_tour_target)
+        self.tour_copy_button.pack(side="left", padx=(6, 2))
+        self.tour_skip_button = ttk.Button(tour_bar, text=tr("Skip", "スキップ"), command=self.skip_tour_target)
+        self.tour_skip_button.pack(side="left", padx=2)
+        self.tour_stop_button = ttk.Button(tour_bar, text=tr("Stop", "停止"), command=self.stop_sphere_tour)
+        self.tour_stop_button.pack(side="left", padx=2)
+        ttk.Label(tour_bar, textvariable=self.tour_status_var, foreground="#0a58ca").pack(side="left", padx=(10, 4))
 
         self.info = tk.Text(self, height=4, wrap="word")
         self.info.pack(fill="x", pady=(6, 0))
@@ -487,12 +505,133 @@ class NearbySystemsApp(ttk.Frame):
         self.status.set(tr("Copied: {name}", "コピーした: {name}", name=name))
 
 
+    def _copy_text_to_clipboard(self, text: str) -> None:
+        if not text:
+            return
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+        except Exception:
+            pass
+
+    def start_sphere_tour(self):
+        self.stop_sphere_tour(silent=True)
+        try:
+            radius = min(max(0.1, float(self.radius_var.get())), 15.0)
+        except Exception:
+            radius = 15.0
+
+        # If search results already exist, arm directly from current center & rows
+        if self.current is not None and getattr(self, "rows", None):
+            origin = tuple(self.current["origin"].pos)
+            self._arm_tour_with_systems(origin, radius, list(self.rows))
+            return
+
+        # Otherwise resolve & fetch sphere around input/journal origin in background
+        where = self.where_var.get().strip()
+        source = self.source_var.get()
+        self.tour_status_var.set(tr("Tour: Loading sphere systems…", "巡回: 星系データ読込中…"))
+        self.status.set(tr("Preparing 15ly sphere tour…", "15ly スフィア巡回を準備中…"))
+
+        def _worker():
+            try:
+                res = ns.search(where, radius=radius, hops=1, source=source)
+                origin = tuple(res.centre.pos)
+                self.after(0, self._arm_tour_with_systems, origin, radius, list(res.rows))
+            except Exception as e:
+                self.after(0, lambda err=e: (
+                    self.tour_status_var.set(tr("Tour: Error", "巡回: エラー")),
+                    self.status.set(tr("Error: {error}", "エラー: {error}", error=err)),
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _arm_tour_with_systems(self, origin, radius: float, systems: Sequence[Dict]):
+        count = self.tour_manager.arm_tour(origin, systems, radius=radius)
+        if count == 0:
+            self.tour_status_var.set(tr("Tour: No systems (0)", "巡回: 対象なし (0件)"))
+            self.status.set(tr("No systems found within {r:g} ly sphere.", "指定スフィア ({r:g} ly以内) に星系が見つかりませんでした。", r=radius))
+            return
+        self.jump_monitor.arm()
+        self._last_auto_copied_token = None
+        self.tour_status_var.set(tr("Tour: Waiting FSDJump ({c} systems / {r:g}ly)", "巡回: FSDJump待機中 ({c}件 / {r:g}ly)", c=count, r=radius))
+        self.status.set(tr("Tour armed ({c} systems). Plot origin and jump; next nearest auto-copies on FSDJump.", "巡回準備完了 ({c}件)。起点をプロットしてFSDJump完了後に次の近い星系を自動コピーします。", c=count))
+        self._schedule_tour_poll()
+
+    def _schedule_tour_poll(self):
+        if getattr(self, "_tour_poll_after_id", None) is not None:
+            try:
+                self.after_cancel(self._tour_poll_after_id)
+            except Exception:
+                pass
+        self._tour_poll_after_id = self.after(2000, self._poll_tour_jump)
+
+    def _poll_tour_jump(self):
+        self._tour_poll_after_id = None
+        if self.tour_manager.state not in ("ARMED_WAITING_JUMP", "ACTIVE"):
+            return
+        ev = self.jump_monitor.poll_next_jump()
+        if ev is not None:
+            token = ev.get("token")
+            if token and token != self._last_auto_copied_token:
+                self._last_auto_copied_token = token
+                nxt = self.tour_manager.on_fsd_jump(ev)
+                if nxt is not None:
+                    self._copy_text_to_clipboard(nxt["name"])
+                    rem = self.tour_manager.remaining_count()
+                    self.tour_status_var.set(tr("Touring ({rem} left) -> Next: {name} ({dist:.1f} ly)", "巡回中 (残{rem}件) → 次: {name} ({dist:.1f} ly)", rem=rem, name=nxt["name"], dist=nxt["distance"]))
+                    self.status.set(tr("FSDJump [{arr}] -> Auto-copied next: [{name}] ({dist:.1f} ly)", "FSDJump検知 [{arr}] → 次の星系 [{name}] ({dist:.1f} ly) を1度だけ自動コピーしました。", arr=ev["system"], name=nxt["name"], dist=nxt["distance"]))
+                else:
+                    self.tour_status_var.set(tr("Tour Complete (all visited)", "巡回完了 (すべて訪問済み)"))
+                    self.status.set(tr("FSDJump [{arr}] -> Sphere tour complete!", "FSDJump検知 [{arr}] → スフィア内の巡回が完了しました！", arr=ev["system"]))
+                    return
+        if self.tour_manager.state in ("ARMED_WAITING_JUMP", "ACTIVE"):
+            self._schedule_tour_poll()
+
+    def copy_tour_target(self):
+        tgt = self.tour_manager.current_target
+        if tgt is None and self.tour_manager.state == "ARMED_WAITING_JUMP":
+            tgt = self.tour_manager.skip_current()
+        if tgt is None:
+            self.status.set(tr("No tour target system to copy.", "コピー対象の巡回星系がありません。"))
+            return
+        self._copy_text_to_clipboard(tgt["name"])
+        rem = self.tour_manager.remaining_count()
+        self.tour_status_var.set(tr("Touring ({rem} left) -> Next: {name} ({dist:.1f} ly)", "巡回中 (残{rem}件) → 次: {name} ({dist:.1f} ly)", rem=rem, name=tgt["name"], dist=tgt["distance"]))
+        self.status.set(tr("Copied next system [{name}] ({dist:.1f} ly) to clipboard.", "次の星系 [{name}] ({dist:.1f} ly) をクリップボードにコピーしました。", name=tgt["name"], dist=tgt["distance"]))
+
+    def skip_tour_target(self):
+        nxt = self.tour_manager.skip_current()
+        if nxt is None:
+            self.tour_status_var.set(tr("Tour Complete (none left)", "巡回完了 (残りなし)"))
+            self.status.set(tr("No unvisited systems left in sphere.", "スフィア内の未訪問星系はもうありません。"))
+            return
+        self._copy_text_to_clipboard(nxt["name"])
+        rem = self.tour_manager.remaining_count()
+        self.tour_status_var.set(tr("Touring ({rem} left) -> Next: {name} ({dist:.1f} ly)", "巡回中 (残{rem}件) → 次: {name} ({dist:.1f} ly)", rem=rem, name=nxt["name"], dist=nxt["distance"]))
+        self.status.set(tr("Skipped. Copied next system [{name}] ({dist:.1f} ly).", "スキップしました。次の星系 [{name}] ({dist:.1f} ly) をコピーしました。", name=nxt["name"], dist=nxt["distance"]))
+
+    def stop_sphere_tour(self, silent: bool = False):
+        if getattr(self, "_tour_poll_after_id", None) is not None:
+            try:
+                self.after_cancel(self._tour_poll_after_id)
+            except Exception:
+                pass
+            self._tour_poll_after_id = None
+        self.tour_manager.state = "IDLE"
+        if not silent:
+            self.tour_status_var.set(tr("Tour: Idle", "巡回: 停止中"))
+            self.status.set(tr("Stopped sphere tour monitor.", "スフィア巡回監視を停止しました。"))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("where", nargs="?", default="", help=tr("Empty = journal pos / 'x,y,z' / id64 / system name", "空 = ジャーナルの現在地 / 'x,y,z' / id64 / 星系名"))
     ap.add_argument("--radius", "-r", type=float, default=ns.DEFAULT_RADIUS)
     ap.add_argument("--hops", "-n", type=int, default=1, help=tr("Number of chained hops (n)", "ジャンプ回数 n(自動でつなげる回数)"))
+    ap.add_argument("--lang", choices=["en", "ja"], default="en", help="UI language (en or ja)")
     args = ap.parse_args(argv)
+    set_lang(args.lang)
     root = tk.Tk()
     root.geometry("1180x780")
     app = NearbySystemsApp(root, args.where, args.radius, args.hops)

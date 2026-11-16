@@ -174,6 +174,10 @@ def _db():
     return sqlite3.connect(f"file:{bc.DB_PATH.as_posix()}?mode=ro", uri=True)
 
 
+def catalogue_available() -> bool:
+    return CATALOG_DIR.exists()
+
+
 def _catalog():
     import pyarrow.dataset as ds
     return ds.dataset(str(CATALOG_DIR), format="parquet")
@@ -190,13 +194,16 @@ def _box_filter(pos: Sequence[float], r: float):
 
 def catalogue_box(pos: Sequence[float], r: float):
     """DataFrame (id64, x, y, z) of the catalogue systems in the cube of half-side r around pos (one filtered scan)."""
+    if not catalogue_available():
+        import pandas as pd
+        return pd.DataFrame(columns=["id64", "x", "y", "z"])
     return _catalog().to_table(columns=["id64", "x", "y", "z"], filter=_box_filter(pos, r)).to_pandas()
 
 
 def fit_reach(pos: Sequence[float], reach: float) -> float:
     """reach, or the largest halving of it whose cube holds at most MAX_BOX_ROWS catalogue systems (a huge n would otherwise try to read the whole 190 million systems into memory).
     Cubes up to CHECK_ABOVE ly are never counted: they are small in any region, so the usual searches pay nothing."""
-    if reach <= CHECK_ABOVE:
+    if not catalogue_available() or reach <= CHECK_ABOVE:
         return reach
     r = min(reach, CHECK_START)
     while r > CHECK_ABOVE and _catalog().count_rows(filter=_box_filter(pos, r)) > MAX_BOX_ROWS:
@@ -205,6 +212,8 @@ def fit_reach(pos: Sequence[float], reach: float) -> float:
 
 
 def catalogue_by_id64(v: int) -> Optional[Tuple[float, float, float]]:
+    if not catalogue_available():
+        return None
     import pyarrow.dataset as ds
     t = _catalog().to_table(columns=["x", "y", "z"], filter=ds.field("id64") == v).to_pylist()
     return (t[0]["x"], t[0]["y"], t[0]["z"]) if t else None
@@ -688,7 +697,11 @@ def search(where: str, radius: float = DEFAULT_RADIUS, hops: int = 1, source: st
             ed = None
             fallback = source == SOURCE_EDSM
             notes.append(f"EDSM: {e}。" + ("カタログで代用した" if fallback else "カタログだけで表示している"))
-    use_cat = source in (SOURCE_CATALOG, SOURCE_BOTH) or fallback
+    use_cat = (source in (SOURCE_CATALOG, SOURCE_BOTH) or fallback) and catalogue_available()
+    if source == SOURCE_CATALOG and not catalogue_available():
+        raise ValueError("Local catalog (data/full_catalog) is not installed. Please use EDSM mode.")
+    if fallback and not catalogue_available():
+        notes.append("Local catalog (data/full_catalog) is not installed; fallback unavailable.")
     if use_cat:
         area = fit_reach(c.pos, reach)
         if area < reach:

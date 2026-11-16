@@ -16,29 +16,34 @@ from tkinter import ttk
 from typing import List, Optional, Sequence
 
 import boxel_calculator as bc
+from i18n import set_lang, tr
 import sector_neighbors as sn
 
-COLUMNS = [("ring", "殻", 40, "center"), ("name", "セクター名", 190, "w"), ("xyz", "XYZ", 90, "center"), ("delta", "Δセル x,y,z", 90, "center"),
-           ("off", "中心へのずれ ly (x, y, z)", 190, "center"), ("dir", "方位", 110, "w"), ("edge", "edge", 60, "e"), ("centre", "centre", 60, "e"), ("cell", "格子 i,j,k", 90, "center")]
+def get_columns():
+    return [("ring", tr("Shell", "殻"), 40, "center"), ("name", tr("Sector Name", "セクター名"), 190, "w"), ("xyz", "XYZ", 90, "center"), ("delta", tr("ΔCell x,y,z", "Δセル x,y,z"), 90, "center"),
+            ("off", tr("Offset to Centre ly (x, y, z)", "中心へのずれ ly (x, y, z)"), 190, "center"), ("dir", tr("Bearing", "方位"), 110, "w"), ("edge", "edge", 60, "e"), ("centre", "centre", 60, "e"), ("cell", tr("Grid i,j,k", "格子 i,j,k"), 90, "center")]
+
+
+COLUMNS = get_columns()
 
 
 def xyz_label(delta_cell: Sequence[int]) -> str:
     """'+X -Z' from the cell offset (x, y, z); '(現在地)' when it is 0,0,0."""
     parts = [f"{'+' if d > 0 else '-'}{axis}" + (str(abs(d)) if abs(d) > 1 else "") for d, axis in zip(delta_cell, "XYZ") if d]
-    return " ".join(parts) or "(現在地)"
+    return " ".join(parts) or tr("(Here)", "(現在地)")
 
 
 class SectorNeighborsApp(ttk.Frame):
     def __init__(self, master, where: str = "", radii: str = ""):
         super().__init__(master, padding=8)
-        self.master.title("Sector Neighbors — 近隣セクターの名前と XYZ 方向")
+        self.master.title(tr("Sector Neighbors — Nearby Sectors & XYZ Directions", "Sector Neighbors — 近隣セクターの名前と XYZ 方向"))
         self.pack(fill="both", expand=True)
         self.busy = False
         self.where_var = tk.StringVar(value=where)
         self.radii_var = tk.StringVar(value=radii or ",".join(f"{r:g}" for r in sn.DEFAULT_RADII))
         self.predict = tk.BooleanVar(value=sn.SHOW_PREDICTED)
         self.hide_unnamed = tk.BooleanVar(value=False)
-        self.status = tk.StringVar(value="システム名・セクター名・座標 'x,y,z' を入れて Enter")
+        self.status = tk.StringVar(value=tr("Enter system, sector, or 'x,y,z' and press Enter", "システム名・セクター名・座標 'x,y,z' を入れて Enter"))
         self._result = None
         sn.use_merged_table()
         self._build()
@@ -46,20 +51,20 @@ class SectorNeighborsApp(ttk.Frame):
     def _build(self):
         top = ttk.Frame(self)
         top.pack(fill="x")
-        ttk.Label(top, text="現在地").grid(row=0, column=0, sticky="w")
+        ttk.Label(top, text=tr("Location", "現在地")).grid(row=0, column=0, sticky="w")
         entry = ttk.Entry(top, textvariable=self.where_var, width=36)
         entry.grid(row=0, column=1, sticky="w", padx=(4, 12))
         entry.bind("<Return>", lambda _e: self.start_search())
         entry.focus_set()
-        ttk.Label(top, text="半径 ly").grid(row=0, column=2, sticky="w")
+        ttk.Label(top, text=tr("Radii ly", "半径 ly")).grid(row=0, column=2, sticky="w")
         radii = ttk.Entry(top, textvariable=self.radii_var, width=14)
         radii.grid(row=0, column=3, sticky="w", padx=(4, 12))
         radii.bind("<Return>", lambda _e: self.start_search())
-        self.button = ttk.Button(top, text="検索", command=self.start_search)
+        self.button = ttk.Button(top, text=tr("Search", "検索"), command=self.start_search)
         self.button.grid(row=0, column=4, sticky="w")
-        ttk.Button(top, text="名前をコピー", command=self.copy_name).grid(row=0, column=5, sticky="w", padx=6)
-        ttk.Checkbutton(top, text="予測名を出す", variable=self.predict, command=self.refresh).grid(row=1, column=1, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(top, text="名前の無いセクターを隠す", variable=self.hide_unnamed, command=self.refresh).grid(row=1, column=2, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Button(top, text=tr("Copy Name", "名前をコピー"), command=self.copy_name).grid(row=0, column=5, sticky="w", padx=6)
+        ttk.Checkbutton(top, text=tr("Show Predicted Names", "予測名を出す"), variable=self.predict, command=self.refresh).grid(row=1, column=1, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(top, text=tr("Hide Unnamed Sectors", "名前の無いセクターを隠す"), variable=self.hide_unnamed, command=self.refresh).grid(row=1, column=2, columnspan=2, sticky="w", pady=(4, 0))
 
         self.info = tk.Text(self, height=4, wrap="word")
         self.info.pack(fill="x", pady=(6, 0))
@@ -85,15 +90,15 @@ class SectorNeighborsApp(ttk.Frame):
             if not radii or min(radii) <= 0:
                 raise ValueError
         except ValueError:
-            self.status.set("半径は正の数をカンマ区切りで(例 1500,3000)")
+            self.status.set(tr("Enter positive comma-separated radii (e.g. 1500,3000)", "半径は正の数をカンマ区切りで(例 1500,3000)"))
             return
         where = self.where_var.get().strip()
         if not where:
-            self.status.set("現在地を入れる")
+            self.status.set(tr("Enter location", "現在地を入れる"))
             return
         self.busy = True
         self.button.state(["disabled"])
-        self.status.set("検索中…")
+        self.status.set(tr("Searching…", "検索中…"))
         self._result = None
         threading.Thread(target=self._worker, args=(where, radii), daemon=True).start()
         self.after(100, self._poll)
@@ -116,7 +121,7 @@ class SectorNeighborsApp(ttk.Frame):
         self.busy = False
         self.button.state(["!disabled"])
         if error is not None:
-            self.status.set(f"エラー: {error}")
+            self.status.set(tr("Error: {error}", "エラー: {error}", error=error))
             return
         self.pos, self.how, self.radii = pos, how, radii
         self.refresh()
@@ -129,12 +134,12 @@ class SectorNeighborsApp(ttk.Frame):
         rows = sn.neighbours(self.pos, self.radii, predict)
         here = bc.sector_cell(self.pos)
         here_pred = None if bc.sector_name(here) or not predict else sn.predicted_name(here)
-        info = [f"位置 ({self.pos[0]:.2f}, {self.pos[1]:.2f}, {self.pos[2]:.2f}) ly  [{self.how}]",
-                f"現在のセクター: {bc.sector_name(here) or (here_pred + ' (予測)' if here_pred else '不明')} {here}",
-                "XYZ: +X = 銀河の東, +Z = Sgr A* 側, +Y = 上。方位 0°=+Z 90°=+X。edge = そのセクターの最寄り点までの距離, centre = 中心まで (ly)"]
+        info = [tr("Pos ({x:.2f}, {y:.2f}, {z:.2f}) ly  [{how}]", "位置 ({x:.2f}, {y:.2f}, {z:.2f}) ly  [{how}]", x=self.pos[0], y=self.pos[1], z=self.pos[2], how=self.how),
+                tr("Current sector: {sec} {here}", "現在のセクター: {sec} {here}", sec=bc.sector_name(here) or (here_pred + tr(" (est.)", " (予測)") if here_pred else tr("Unknown", "不明")), here=here),
+                tr("XYZ: +X=Galactic East, +Z=towards Sgr A*, +Y=Up. Bearing 0°=+Z 90°=+X. edge/centre = distance in ly.", "XYZ: +X = 銀河の東, +Z = Sgr A* 側, +Y = 上。方位 0°=+Z 90°=+X。edge = そのセクターの最寄り点までの距離, centre = 中心まで (ly)")]
         regions = bc.named_regions_containing(self.pos)
         if regions:
-            info.append(f"注意: 手名付き領域 {', '.join(regions)} の内側。この中では格子の名前が当てにならない")
+            info.append(tr("Note: Inside hand-named region {reg}; grid names are unreliable here.", "注意: 手名付き領域 {reg} の内側。この中では格子の名前が当てにならない", reg=", ".join(regions)))
         self.info.delete("1.0", "end")
         self.info.insert("1.0", "\n".join(info))
         self.tree.delete(*self.tree.get_children())
@@ -146,16 +151,16 @@ class SectorNeighborsApp(ttk.Frame):
                 unnamed += 0 if s["predicted"] else 1
                 if self.hide_unnamed.get():
                     continue
-            name = s["name"] or (f"{s['predicted']} (予測)" if s["predicted"] else "不明")
+            name = s["name"] or (f"{s['predicted']}{tr(' (est.)', ' (予測)')}" if s["predicted"] else tr("Unknown", "不明"))
             dcell = tuple(s["cell"][i] - here[i] for i in range(3))
             dx, dy, dz = s["delta"]
-            where = "(現在地)" if s["cell"] == here else s["dir"]
+            where = tr("(Here)", "(現在地)") if s["cell"] == here else s["dir"]
             self.tree.insert("", "end", iid=str(shown_n), values=[s["ring"] + 1, name, xyz_label(dcell), ",".join(f"{d:+d}" if d else "0" for d in dcell),
                                                                   f"{dx:+.0f}, {dy:+.0f}, {dz:+.0f}", where, f"{s['edge']:.0f}", f"{s['centre_dist']:.0f}", ",".join(map(str, s["cell"]))])
             self.shown.append(s)
             shown_n += 1
-        self.status.set(f"{len(rows)} セクター(表示 {shown_n}、予測 {predicted}、不明 {unnamed})  殻 1 = 〜{min(self.radii):g} ly" +
-                        (f"、殻 2 = 〜{sorted(self.radii)[1]:g} ly" if len(self.radii) > 1 else ""))
+        self.status.set(tr("{tot} sectors (shown {shown}, est {pred}, unnamed {unn})  Shell 1 <= {r1:g} ly", "{tot} セクター(表示 {shown}、予測 {pred}、不明 {unn})  殻 1 = 〜{r1:g} ly", tot=len(rows), shown=shown_n, pred=predicted, unn=unnamed, r1=min(self.radii)) +
+                        (tr(", Shell 2 <= {r2:g} ly", "、殻 2 = 〜{r2:g} ly", r2=sorted(self.radii)[1]) if len(self.radii) > 1 else ""))
 
     def on_click(self, event):
         """a click on the セクター名 cell copies that sector's name."""
@@ -178,13 +183,13 @@ class SectorNeighborsApp(ttk.Frame):
             return
         self.clipboard_clear()
         self.clipboard_append(name)
-        self.status.set(f"コピーした: {name}")
+        self.status.set(tr("Copied: {name}", "コピーした: {name}", name=name))
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("where", nargs="?", default="", help="システム名 / セクター名 / 'x,y,z'")
-    ap.add_argument("--radii", default="", help="半径(ly)のカンマ区切り。既定 1500,3000")
+    ap.add_argument("where", nargs="?", default="", help=tr("System / Sector / 'x,y,z'", "システム名 / セクター名 / 'x,y,z'"))
+    ap.add_argument("--radii", default="", help=tr("Comma-separated radii in ly (default 1500,3000)", "半径(ly)のカンマ区切り。既定 1500,3000"))
     args = ap.parse_args(argv)
     root = tk.Tk()
     root.geometry("1040x700")

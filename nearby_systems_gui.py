@@ -30,10 +30,15 @@ from collections import Counter
 from tkinter import filedialog, ttk
 from typing import Dict, List, Optional, Sequence
 
+from i18n import set_lang, tr
 import nearby_systems as ns
 
-COLUMNS = [("hop", "hop", 40, "center"), ("name", "名前", 230, "w"), ("step", "直前から", 70, "e"), ("dist", "中心から", 70, "e"), ("parent", "直前の系", 190, "w"),
-           ("src", "出どころ", 70, "center"), ("x", "x", 90, "e"), ("y", "y", 90, "e"), ("z", "z", 90, "e"), ("id64", "id64", 130, "e")]
+def get_columns():
+    return [("hop", "hop", 40, "center"), ("name", tr("Name", "名前"), 230, "w"), ("step", tr("From Prev", "直前から"), 70, "e"), ("dist", tr("From Origin", "中心から"), 70, "e"), ("parent", tr("Via System", "直前の系"), 190, "w"),
+            ("src", tr("Source", "出どころ"), 70, "center"), ("x", "x", 90, "e"), ("y", "y", 90, "e"), ("z", "z", 90, "e"), ("id64", "id64", 130, "e")]
+
+
+COLUMNS = get_columns()
 SORT_KEYS = ("x", "y", "z")   # the columns whose header sorts the table (click: ascending, again: descending, again: the original nearest-first order)
 CSV_HEADER = ["no", "name", "id64", "x", "y", "z", "leg_ly", "total_ly"]   # the route CSV: one row per stop; only name (or id64) and x y z are needed to load it
 CSV_MAX_BYTES, CSV_MAX_STOPS = 2 * 1024 * 1024, 5000   # a route CSV larger than this, or with more stops, is refused (a hostile or broken file must not exhaust memory)
@@ -49,13 +54,17 @@ def csv_unsafe(text: str) -> str:
     return text[1:] if text[:1] == "'" and text[1:2] in _FORMULA_START else text
 
 
-ROUTE_COLUMNS = [("no", "#", 40, "center"), ("name", "名前", 230, "w"), ("leg", "区間 ly", 80, "e"), ("total", "累計 ly", 80, "e"), ("id64", "id64", 130, "e")]
+def get_route_columns():
+    return [("no", "#", 40, "center"), ("name", tr("Name", "名前"), 230, "w"), ("leg", tr("Leg ly", "区間 ly"), 80, "e"), ("total", tr("Total ly", "累計 ly"), 80, "e"), ("id64", "id64", 130, "e")]
+
+
+ROUTE_COLUMNS = get_route_columns()
 
 
 class NearbySystemsApp(ttk.Frame):
     def __init__(self, master, where: str = "", radius: float = ns.DEFAULT_RADIUS, hops: int = 1):
         super().__init__(master, padding=8)
-        self.master.title("Nearby Systems — 16 ly 以内の星系と、ジャンプで伸ばす経路")
+        self.master.title(tr("Nearby Systems — Systems within R ly & Jump Route Builder", "Nearby Systems — 16 ly 以内の星系と、ジャンプで伸ばす経路"))
         self.pack(fill="both", expand=True)
         self.busy = False
         self.where_var = tk.StringVar(value=where)
@@ -65,7 +74,7 @@ class NearbySystemsApp(ttk.Frame):
         self.min_var = tk.StringVar(value="0")
         self.omit_var = tk.BooleanVar(value=False)
         self.source_var = tk.StringVar(value=ns.SOURCE_EDSM)
-        self.status = tk.StringVar(value="現在地を入れて Enter(空 = ジャーナルの現在地)。取得元は既定で EDSM(キャッシュあり・間隔を空けて問い合わせる)")
+        self.status = tk.StringVar(value=tr("Enter origin and press Enter (empty = journal pos). Default source: EDSM (cached & rate-limited).", "現在地を入れて Enter(空 = ジャーナルの現在地)。取得元は既定で EDSM(キャッシュあり・間隔を空けて問い合わせる)"))
         self._result = None
         self.rows: List[dict] = []
         self.route: List[dict] = []                    # stops {name, pos, id64, leg} from the start to the last one; the table lists what is within reach of the last
@@ -79,48 +88,48 @@ class NearbySystemsApp(ttk.Frame):
     def _build(self):
         top = ttk.Frame(self)
         top.pack(fill="x")
-        ttk.Label(top, text="現在地").grid(row=0, column=0, sticky="w")
+        ttk.Label(top, text=tr("Origin", "現在地")).grid(row=0, column=0, sticky="w")
         entry = ttk.Entry(top, textvariable=self.where_var, width=40)
         entry.grid(row=0, column=1, columnspan=3, sticky="w", padx=(4, 8))
         entry.bind("<Return>", lambda _e: self.start_search())
         entry.focus_set()
-        ttk.Button(top, text="ジャーナルの現在地", command=self.use_journal).grid(row=0, column=4, columnspan=2, sticky="w")
-        ttk.Label(top, text="半径 ly").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Button(top, text=tr("Journal Pos", "ジャーナルの現在地"), command=self.use_journal).grid(row=0, column=4, columnspan=2, sticky="w")
+        ttk.Label(top, text=tr("Radius ly", "半径 ly")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(top, textvariable=self.radius_var, width=7).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=(6, 0))
-        ttk.Label(top, text="ジャンプ回数 n").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Label(top, text=tr("Hops n", "ジャンプ回数 n")).grid(row=1, column=2, sticky="w", pady=(6, 0))
         ttk.Entry(top, textvariable=self.hops_var, width=6).grid(row=1, column=3, sticky="w", padx=(4, 8), pady=(6, 0))
-        ttk.Label(top, text="上限").grid(row=1, column=4, sticky="w", pady=(6, 0))
+        ttk.Label(top, text=tr("Limit", "上限")).grid(row=1, column=4, sticky="w", pady=(6, 0))
         ttk.Entry(top, textvariable=self.max_var, width=7).grid(row=1, column=5, sticky="w", padx=(4, 8), pady=(6, 0))
-        ttk.Label(top, text="最小距離 ly").grid(row=1, column=6, sticky="w", pady=(6, 0))
+        ttk.Label(top, text=tr("Min Dist ly", "最小距離 ly")).grid(row=1, column=6, sticky="w", pady=(6, 0))
         mind = ttk.Entry(top, textvariable=self.min_var, width=7)
         mind.grid(row=1, column=7, sticky="w", padx=(4, 8), pady=(6, 0))
         mind.bind("<Return>", lambda _e: self.apply_filter())
         mind.bind("<FocusOut>", lambda _e: self.apply_filter())
-        ttk.Checkbutton(top, text="前の基準と重なる系を省く(最後の系より前の経路の系の半径内にある系を表から外す)", variable=self.omit_var,
+        ttk.Checkbutton(top, text=tr("Omit systems covered by earlier route stops", "前の基準と重なる系を省く(最後の系より前の経路の系の半径内にある系を表から外す)"), variable=self.omit_var,
                         command=self.apply_filter).grid(row=2, column=0, columnspan=8, sticky="w", pady=(6, 0))
         src = ttk.Frame(top)
         src.grid(row=3, column=0, columnspan=8, sticky="w", pady=(6, 0))
-        ttk.Label(src, text="取得元").pack(side="left", padx=(0, 8))
-        for value, label in ((ns.SOURCE_EDSM, "EDSM"), (ns.SOURCE_CATALOG, "カタログ(オフライン)"), (ns.SOURCE_BOTH, "両方")):
+        ttk.Label(src, text=tr("Source", "取得元")).pack(side="left", padx=(0, 8))
+        for value, label in ((ns.SOURCE_EDSM, "EDSM"), (ns.SOURCE_CATALOG, tr("Catalog (Offline)", "カタログ(オフライン)")), (ns.SOURCE_BOTH, tr("Both", "両方"))):
             ttk.Radiobutton(src, text=label, value=value, variable=self.source_var).pack(side="left", padx=(0, 10))
         buttons = ttk.Frame(self)
         buttons.pack(fill="x", pady=(6, 0))
-        self.button = ttk.Button(buttons, text="検索", command=self.start_search)
+        self.button = ttk.Button(buttons, text=tr("Search", "検索"), command=self.start_search)
         self.button.pack(side="left")
-        ttk.Button(buttons, text="名前をコピー", command=self.copy_selected).pack(side="left", padx=6)
-        self.back_button = ttk.Button(buttons, text="戻る", command=self.go_back, state="disabled")
+        ttk.Button(buttons, text=tr("Copy Name", "名前をコピー"), command=self.copy_selected).pack(side="left", padx=6)
+        self.back_button = ttk.Button(buttons, text=tr("Back", "戻る"), command=self.go_back, state="disabled")
         self.back_button.pack(side="left", padx=(18, 6))
-        self.reset_button = ttk.Button(buttons, text="全リセット", command=self.reset_all)
+        self.reset_button = ttk.Button(buttons, text=tr("Reset All", "全リセット"), command=self.reset_all)
         self.reset_button.pack(side="left")
-        self.delete_button = ttk.Button(buttons, text="経路の最後を削除", command=self.delete_last)
+        self.delete_button = ttk.Button(buttons, text=tr("Drop Last Stop", "経路の最後を削除"), command=self.delete_last)
         self.delete_button.pack(side="left", padx=(6, 0))
-        ttk.Button(buttons, text="経路を保存(CSV)", command=self.save_route).pack(side="left", padx=(18, 6))
-        self.load_button = ttk.Button(buttons, text="経路を読み込み(CSV)", command=self.load_route)
+        ttk.Button(buttons, text=tr("Save Route (CSV)", "経路を保存(CSV)"), command=self.save_route).pack(side="left", padx=(18, 6))
+        self.load_button = ttk.Button(buttons, text=tr("Load Route (CSV)", "経路を読み込み(CSV)"), command=self.load_route)
         self.load_button.pack(side="left")
 
         self.info = tk.Text(self, height=4, wrap="word")
         self.info.pack(fill="x", pady=(6, 0))
-        ttk.Label(self, text="経路(出発点 → … → 最後の系。下の表は最後の系から届く系)").pack(fill="x", pady=(6, 0))
+        ttk.Label(self, text=tr("Route (Origin -> ... -> Last Stop; table shows reachable systems)", "経路(出発点 → … → 最後の系。下の表は最後の系から届く系)")).pack(fill="x", pady=(6, 0))
         rframe = ttk.Frame(self)
         rframe.pack(fill="x")
         self.route_tree = ttk.Treeview(rframe, columns=[c[0] for c in ROUTE_COLUMNS], show="headings", height=5, selectmode="browse")
@@ -160,13 +169,13 @@ class NearbySystemsApp(ttk.Frame):
             if not (0 < radius <= ns.MAX_RADIUS_INPUT) or not 1 <= hops <= ns.MAX_HOPS_INPUT or not 1 <= max_systems <= ns.MAX_SYSTEMS_INPUT:
                 raise ValueError
         except ValueError:
-            self.status.set(f"半径は 0 より大きく {ns.MAX_RADIUS_INPUT:g} 以下、ジャンプ回数は 1〜{ns.MAX_HOPS_INPUT:,}、上限は 1〜{ns.MAX_SYSTEMS_INPUT:,} の整数で入れる")
+            self.status.set(tr("Radius in (0, {mr:g}], hops in 1..{mh:,}, limit in 1..{ml:,}.", "半径は 0 より大きく {mr:g} 以下、ジャンプ回数は 1〜{mh:,}、上限は 1〜{ml:,} の整数で入れる", mr=ns.MAX_RADIUS_INPUT, mh=ns.MAX_HOPS_INPUT, ml=ns.MAX_SYSTEMS_INPUT))
             return None
         return radius, hops, max_systems
 
     @staticmethod
     def _stop_centre(stop: dict) -> ns.Centre:
-        return ns.Centre(tuple(stop["pos"]), stop["name"], stop["id64"], "経路の最後の系")  # type: ignore[arg-type]
+        return ns.Centre(tuple(stop["pos"]), stop["name"], stop["id64"], tr("Last route stop", "経路の最後の系"))  # type: ignore[arg-type]
 
     def start_search(self, new: bool = False):
         """検索: with an unchanged 現在地 text and a route, ask again around the route's last stop (route kept); otherwise start a new route from the text."""
@@ -188,7 +197,7 @@ class NearbySystemsApp(ttk.Frame):
             source = ns.SOURCE_EDSM
         self.busy = True
         self._update_buttons()
-        self.status.set("検索中…" + ("(EDSM に問い合わせ中。キャッシュに無いときだけ通信する)" if source != ns.SOURCE_CATALOG else ""))
+        self.status.set(tr("Searching…", "検索中…") + (tr(" (querying EDSM if uncached)", "(EDSM に問い合わせ中。キャッシュに無いときだけ通信する)") if source != ns.SOURCE_CATALOG else ""))
         self._result = None
         self._action = (mode, (radius, hops, source), new_route, text)
         threading.Thread(target=self._worker, args=(where, radius, hops, source, max_systems, centre), daemon=True).start()
@@ -217,14 +226,14 @@ class NearbySystemsApp(ttk.Frame):
         self.busy = False
         if error is not None:
             self._update_buttons()
-            self.status.set(f"エラー: {error}")
+            self.status.set(tr("Error: {error}", "エラー: {error}", error=error))
             return
         mode, params, new_route, text = self._action
         if self.current is not None:   # what is replaced can be come back to with 戻る
             self.history.append((list(self.route), self.current, self.params, self.start_text))
         if mode == "new":
             c = res.centre
-            self.route = [{"name": c.name or "(座標)", "pos": c.pos, "id64": c.id64, "leg": 0.0}]
+            self.route = [{"name": c.name or tr("(Coords)", "(座標)"), "pos": c.pos, "id64": c.id64, "leg": 0.0}]
             self.start_text = text
         elif mode in ("extend", "load"):
             self.route = new_route
@@ -253,9 +262,9 @@ class NearbySystemsApp(ttk.Frame):
             self.rows.sort(key=lambda r: r[self.sort[0]], reverse=self.sort[1])   # the tree's row ids are positions in self.rows, so sorting it sorts the table
         c = res.centre
         self.info.delete("1.0", "end")
-        self.info.insert("1.0", f"候補の中心 {c.name or '(座標)'}  ({c.pos[0]:.4f}, {c.pos[1]:.4f}, {c.pos[2]:.4f}) ly" + (f"  id64 {c.id64}" if c.id64 else "") + f"  [{c.how}]\n" +
-                         f"半径 {radius:g} ly × {hops} ジャンプ、距離 {lo:g}〜{radius:g} ly  取得元: {ns.SOURCE_LABEL.get(source, source)}" +
-                         (f"  前の基準と重なる系を省略: {omitted} 系" if self.omit_var.get() else "") + (f"  経路に入っている系を除外: {on_route} 系" if on_route else "") +
+        self.info.insert("1.0", tr("Center {name}  ({x:.4f}, {y:.4f}, {z:.4f}) ly", "候補の中心 {name}  ({x:.4f}, {y:.4f}, {z:.4f}) ly", name=c.name or tr("(Coords)", "(座標)"), x=c.pos[0], y=c.pos[1], z=c.pos[2]) + (f"  id64 {c.id64}" if c.id64 else "") + f"  [{c.how}]\n" +
+                         tr("Radius {r:g} ly x {h} hop(s), dist {lo:g}-{r:g} ly  Source: {src}", "半径 {r:g} ly × {h} ジャンプ、距離 {lo:g}〜{r:g} ly  取得元: {src}", r=radius, h=hops, lo=lo, src=ns.SOURCE_LABEL.get(source, source)) +
+                         (tr("  Omitted overlapped: {o}", "  前の基準と重なる系を省略: {o} 系", o=omitted) if self.omit_var.get() else "") + (tr("  Excluded in route: {r}", "  経路に入っている系を除外: {r} 系", r=on_route) if on_route else "") +
                          "".join("\n" + i for i in res.info))
         self.route_tree.delete(*self.route_tree.get_children())
         total = 0.0
@@ -282,7 +291,7 @@ class NearbySystemsApp(ttk.Frame):
         if self.busy:
             return
         if len(self.route) < 2:
-            self.status.set("削除できる系が無い(経路の最初の系は残る。全て消すなら全リセット)")
+            self.status.set(tr("Nothing to drop (origin stays; use Reset All to clear).", "削除できる系が無い(経路の最初の系は残る。全て消すなら全リセット)"))
             return
         p = self._read_params()
         if p is None:
@@ -306,53 +315,53 @@ class NearbySystemsApp(ttk.Frame):
         """the stops of a route CSV ({name, pos, id64, leg}); the legs are worked out again from the coordinates. Raises ValueError with a readable message."""
         try:
             if os.path.getsize(path) > CSV_MAX_BYTES:
-                raise ValueError(f"大きすぎる(上限 {CSV_MAX_BYTES // 1024 // 1024} MB)")
+                raise ValueError(tr("File too large (max {mb} MB)", "大きすぎる(上限 {mb} MB)", mb=CSV_MAX_BYTES // 1024 // 1024))
             with open(path, newline="", encoding="utf-8-sig") as f:
                 rows = []
                 for r in csv.DictReader(f):
                     rows.append(r)
                     if len(rows) > CSV_MAX_STOPS:
-                        raise ValueError(f"系が多すぎる(上限 {CSV_MAX_STOPS})")
+                        raise ValueError(tr("Too many stops (max {m})", "系が多すぎる(上限 {m})", m=CSV_MAX_STOPS))
         except (OSError, UnicodeDecodeError, csv.Error) as e:
-            raise ValueError(f"読めない: {e}")
+            raise ValueError(tr("Unreadable: {e}", "読めない: {e}", e=e))
         stops: list = []
         for ln, r in enumerate(rows, 2):
             try:
                 pos = ns.check_position((r["x"], r["y"], r["z"]))
             except (KeyError, TypeError, ValueError):
-                raise ValueError(f"{ln} 行目: x, y, z の列が無いか、数値ではない(列: {', '.join(CSV_HEADER)})")
+                raise ValueError(tr("Line {ln}: missing/non-numeric x, y, z (cols: {cols})", "{ln} 行目: x, y, z の列が無いか、数値ではない(列: {cols})", ln=ln, cols=", ".join(CSV_HEADER)))
             id64 = (r.get("id64") or "").strip()
             if id64 and not re.fullmatch(r"[0-9]{1,19}", id64):
-                raise ValueError(f"{ln} 行目: id64 が数字ではない")
+                raise ValueError(tr("Line {ln}: id64 is not an integer", "{ln} 行目: id64 が数字ではない", ln=ln))
             if id64 and not 0 < int(id64) < 2 ** 63:
-                raise ValueError(f"{ln} 行目: id64 が範囲外")
-            stops.append({"name": ns.clean_name(csv_unsafe((r.get("name") or "").strip())) or "(座標)", "pos": pos, "id64": int(id64) if id64 else None,
+                raise ValueError(tr("Line {ln}: id64 out of range", "{ln} 行目: id64 が範囲外", ln=ln))
+            stops.append({"name": ns.clean_name(csv_unsafe((r.get("name") or "").strip())) or tr("(Coords)", "(座標)"), "pos": pos, "id64": int(id64) if id64 else None,
                           "leg": math.dist(pos, stops[-1]["pos"]) if stops else 0.0})
         if not stops:
-            raise ValueError("経路が空(行が無い)")
+            raise ValueError(tr("Route is empty (no rows)", "経路が空(行が無い)"))
         return stops
 
     def save_route(self):
         if not self.route:
-            self.status.set("保存する経路が無い(先に検索する)")
+            self.status.set(tr("No route to save (search first).", "保存する経路が無い(先に検索する)"))
             return
         safe = lambda s: re.sub(r'[\\/:*?"<>|\s]+', "_", s)[:40]
-        path = filedialog.asksaveasfilename(title="経路を保存", defaultextension=".csv", filetypes=[("CSV", "*.csv"), ("すべて", "*.*")],
+        path = filedialog.asksaveasfilename(title=tr("Save Route", "経路を保存"), defaultextension=".csv", filetypes=[("CSV", "*.csv"), (tr("All", "すべて"), "*.*")],
                                             initialfile=f"route_{safe(self.route[0]['name'])}_to_{safe(self.route[-1]['name'])}.csv")   # the dialog asks before overwriting
         if not path:
             return
         try:
             self.write_route(path)
         except OSError as e:
-            self.status.set(f"保存できない: {e}")
+            self.status.set(tr("Save failed: {e}", "保存できない: {e}", e=e))
             return
-        self.status.set(f"経路 {len(self.route)} 系を保存した: {path}")
+        self.status.set(tr("Saved {n}-stop route: {path}", "経路 {n} 系を保存した: {path}", n=len(self.route), path=path))
 
     def load_route(self, path: Optional[str] = None):
         """read a route CSV and make it the route; the table lists what is within reach of its last stop (catalogue only, 戻る goes back to what was shown)."""
         if self.busy:
             return
-        path = path or filedialog.askopenfilename(title="経路を読み込み", filetypes=[("CSV", "*.csv"), ("すべて", "*.*")])
+        path = path or filedialog.askopenfilename(title=tr("Load Route", "経路を読み込み"), filetypes=[("CSV", "*.csv"), (tr("All", "すべて"), "*.*")])
         if not path:
             return
         p = self._read_params()
@@ -361,7 +370,7 @@ class NearbySystemsApp(ttk.Frame):
         try:
             stops = self.read_route(path)
         except ValueError as e:
-            self.status.set(f"読み込めない: {e}")
+            self.status.set(tr("Load failed: {e}", "読み込めない: {e}", e=e))
             return
         first = stops[0]
         text = str(first["id64"]) if first["id64"] else f"{first['pos'][0]!r},{first['pos'][1]!r},{first['pos'][2]!r}"
@@ -430,7 +439,7 @@ class NearbySystemsApp(ttk.Frame):
         self.route_tree.delete(*self.route_tree.get_children())
         self.info.delete("1.0", "end")
         self._update_buttons()
-        self.status.set("リセットした。現在地を入れて Enter(空 = ジャーナルの現在地)")
+        self.status.set(tr("Reset. Enter origin and press Enter (empty = journal pos).", "リセットした。現在地を入れて Enter(空 = ジャーナルの現在地)"))
 
     # ---- click = copy the name, double click = add to the route
     def on_click(self, event, tree, items):
@@ -448,7 +457,7 @@ class NearbySystemsApp(ttk.Frame):
             return
         r = self.rows[int(row)]
         if r["hop"] == 0:
-            self.status.set("その系は、経路の最後の系(候補の中心)")
+            self.status.set(tr("That is the last stop of the route (current center).", "その系は、経路の最後の系(候補の中心)"))
             return
         by_name: Dict[str, dict] = {x["name"]: x for x in self.current.rows}   # not self.rows: the parents may be hidden by a filter
         chain = [r]   # a hop 2+ system is reached through the systems that found it: add them too
@@ -457,10 +466,10 @@ class NearbySystemsApp(ttk.Frame):
         chain.reverse()
         in_route = {s["name"] for s in self.route}
         if any(c["name"] in in_route for c in chain):
-            self.status.set("経路に入っている系は加えられない")
+            self.status.set(tr("Cannot add a system already in the route.", "経路に入っている系は加えられない"))
             return
         stops = [{"name": c["name"], "pos": (c["x"], c["y"], c["z"]), "id64": c["id64"], "leg": c["step"]} for c in chain]
-        centre = ns.Centre((r["x"], r["y"], r["z"]), r["name"], r["id64"], "経路に加えた系")
+        centre = ns.Centre((r["x"], r["y"], r["z"]), r["name"], r["id64"], tr("Added to route", "経路に加えた系"))
         self._launch("extend", "", centre, p, self.route + stops, self.start_text)
 
     def copy_selected(self):
@@ -475,14 +484,14 @@ class NearbySystemsApp(ttk.Frame):
     def copy_name(self, name: str):
         self.clipboard_clear()
         self.clipboard_append(name)
-        self.status.set(f"コピーした: {name}")
+        self.status.set(tr("Copied: {name}", "コピーした: {name}", name=name))
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("where", nargs="?", default="", help="空 = ジャーナルの現在地 / 'x,y,z' / id64 / 星系名")
+    ap.add_argument("where", nargs="?", default="", help=tr("Empty = journal pos / 'x,y,z' / id64 / system name", "空 = ジャーナルの現在地 / 'x,y,z' / id64 / 星系名"))
     ap.add_argument("--radius", "-r", type=float, default=ns.DEFAULT_RADIUS)
-    ap.add_argument("--hops", "-n", type=int, default=1, help="ジャンプ回数 n(自動でつなげる回数)")
+    ap.add_argument("--hops", "-n", type=int, default=1, help=tr("Number of chained hops (n)", "ジャンプ回数 n(自動でつなげる回数)"))
     args = ap.parse_args(argv)
     root = tk.Tk()
     root.geometry("1180x780")

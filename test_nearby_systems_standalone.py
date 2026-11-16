@@ -34,6 +34,9 @@ def test_edsm_mode_without_full_catalog(monkeypatch):
             source=ns.SOURCE_EDSM,
             fetch=lambda pos, r: fake_edsm,
         )
+        assert res.centre.how == "Coordinates"
+        rendered = ns.render(res, 15.0, 1, ns.SOURCE_EDSM)
+        assert "Center " in rendered and "Source: EDSM" in rendered
         names = [r["name"] for r in res.rows]
         assert "Alpha Centauri" in names
         assert "Barnard's Star" in names
@@ -56,6 +59,7 @@ def test_nearby_gui_fsdjump_sphere_tour():
         app.jump_monitor = sphere_tour.FSDJumpMonitor(journal_dir=jdir)
         app.tour_status_var = SimpleNamespace(set=lambda v: None)
         app.status = SimpleNamespace(set=lambda v: None)
+        app.tour_autocopy_var = SimpleNamespace(get=lambda: True)
         app._schedule_tour_poll = lambda: None
         app._tour_poll_after_id = None
         app._last_auto_copied_token = None
@@ -85,3 +89,13 @@ def test_nearby_gui_fsdjump_sphere_tour():
 
         app.skip_tour_target()
         assert copied == ["Near-A", "Near-A", "Near-B"]
+
+        # Verify Auto-copy OFF does not insert into clipboard
+        app.tour_autocopy_var = SimpleNamespace(get=lambda: False)
+        app._arm_tour_with_systems((0.0, 0.0, 0.0), 15.0, systems)
+        copied.clear()
+        with open(jfile, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"timestamp": "2026-11-16T15:10:00Z", "event": "FSDJump", "StarSystem": "Origin-Sys"}) + "\n")
+        app._poll_tour_jump()
+        assert copied == []
+        assert app.tour_manager.current_target["name"] == "Near-A"

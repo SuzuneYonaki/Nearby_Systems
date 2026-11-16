@@ -87,6 +87,7 @@ class NearbySystemsApp(ttk.Frame):
         self.tour_manager = sphere_tour.SphereTourManager()
         self.jump_monitor = sphere_tour.FSDJumpMonitor()
         self.tour_status_var = tk.StringVar(value=tr("Tour: Idle", "巡回: 停止中"))
+        self.tour_autocopy_var = tk.BooleanVar(value=True)
         self._tour_poll_after_id = None
         self._last_auto_copied_token: Optional[str] = None                        # snapshots (route, current, params, start_text), oldest first; 戻る pops the last
         self._build()
@@ -143,6 +144,7 @@ class NearbySystemsApp(ttk.Frame):
         self.tour_skip_button.pack(side="left", padx=2)
         self.tour_stop_button = ttk.Button(tour_bar, text=tr("Stop", "停止"), command=self.stop_sphere_tour)
         self.tour_stop_button.pack(side="left", padx=2)
+        ttk.Checkbutton(tour_bar, text=tr("Auto-copy", "自動コピー"), variable=self.tour_autocopy_var).pack(side="left", padx=(8, 2))
         ttk.Label(tour_bar, textvariable=self.tour_status_var, foreground="#0a58ca").pack(side="left", padx=(10, 4))
 
         self.info = tk.Text(self, height=4, wrap="word")
@@ -577,10 +579,15 @@ class NearbySystemsApp(ttk.Frame):
                 self._last_auto_copied_token = token
                 nxt = self.tour_manager.on_fsd_jump(ev)
                 if nxt is not None:
-                    self._copy_text_to_clipboard(nxt["name"])
+                    auto_copy = getattr(self, "tour_autocopy_var", None)
+                    if auto_copy is None or auto_copy.get():
+                        self._copy_text_to_clipboard(nxt["name"])
+                        msg = tr("FSDJump [{arr}] -> Auto-copied next: [{name}] ({dist:.1f} ly)", "FSDJump検知 [{arr}] → 次の星系 [{name}] ({dist:.1f} ly) を1度だけ自動コピーしました。", arr=ev["system"], name=nxt["name"], dist=nxt["distance"])
+                    else:
+                        msg = tr("FSDJump [{arr}] -> Next: [{name}] ({dist:.1f} ly) (Auto-copy OFF)", "FSDJump検知 [{arr}] → 次の星系 [{name}] ({dist:.1f} ly) (自動コピーOFF)", arr=ev["system"], name=nxt["name"], dist=nxt["distance"])
                     rem = self.tour_manager.remaining_count()
                     self.tour_status_var.set(tr("Touring ({rem} left) -> Next: {name} ({dist:.1f} ly)", "巡回中 (残{rem}件) → 次: {name} ({dist:.1f} ly)", rem=rem, name=nxt["name"], dist=nxt["distance"]))
-                    self.status.set(tr("FSDJump [{arr}] -> Auto-copied next: [{name}] ({dist:.1f} ly)", "FSDJump検知 [{arr}] → 次の星系 [{name}] ({dist:.1f} ly) を1度だけ自動コピーしました。", arr=ev["system"], name=nxt["name"], dist=nxt["distance"]))
+                    self.status.set(msg)
                 else:
                     self.tour_status_var.set(tr("Tour Complete (all visited)", "巡回完了 (すべて訪問済み)"))
                     self.status.set(tr("FSDJump [{arr}] -> Sphere tour complete!", "FSDJump検知 [{arr}] → スフィア内の巡回が完了しました！", arr=ev["system"]))
